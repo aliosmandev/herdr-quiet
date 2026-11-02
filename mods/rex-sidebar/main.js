@@ -325,11 +325,16 @@ export default class RexSidebar extends View {
     // The main app's icon first (a web / app / dashboard / landing / site folder, or one named like
     // the space), then by file type, then the shallowest path.
     const main = (p) => new RegExp(`(^|/)(web|app|dashboard|landing|site|www|${s.name.replace(/[^\w-]/g, "")})/`, "i").test(p);
-    const rank = (p) => (main(p) ? -350 : 0) + (/public\/favicon\.svg$/.test(p) ? 0 : /favicon\.svg$/.test(p) ? 1 : /favicon\.png$/.test(p) ? 2 : /apple-touch-icon\.png$/.test(p) ? 3 : 4) * 100 + p.split("/").length;
+    const rank = (p) => (main(p) ? -350 : 0) + (/(^|\/)(dist|build|out)\//.test(p) ? 500 : 0) + (/public\/favicon\.svg$/.test(p) ? 0 : /favicon\.svg$/.test(p) ? 1 : /favicon\.png$/.test(p) ? 2 : /apple-touch-icon\.png$/.test(p) ? 3 : 4) * 100 + p.split("/").length;
     cx.spawn(async (cx) => {
       let found = null;
       try {
-        for (const f of [".herdr/icon.svg"]) {
+        // A pinned icon wins: data/rex-sidebar/icons.json in the app home, { "<space name>": "/abs/path.svg" }
+        // (kept across installs, unlike the mod folder).
+        const pins = JSON.parse((await readTextFile(`${appHome()}/data/rex-sidebar/icons.json`)) ?? "{}");
+        const pin = pins?.[s.name];
+        if (typeof pin === "string" && pin.startsWith("/") && pin.endsWith(".svg")) found = pin;
+        for (const f of found ? [] : [".herdr/icon.svg"]) {
           if ((await exec("test", ["-f", `${dir}/${f}`])).code === 0) { found = `${dir}/${f}`; break; }
         }
         if (!found) {
