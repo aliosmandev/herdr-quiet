@@ -6,7 +6,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals } from "herdr";
+import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay } from "herdr";
 
 const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
 // OpenCode's busy spinner: braille frames every 80 ms in its muted text colour
@@ -245,6 +245,9 @@ export default class RexSidebar extends View {
     this.folded = new Set();
     this.open = new Set(); // tab ids whose panes are shown under the row
     this.subOpen = new Set(); // tab ids whose sub-agent tree is shown
+    this.icons = {};          // space id -> app-home-relative icon path | null (none found) | pending
+    this.dragSp = null;       // space id being dragged
+    this.overSp = null;
     this.showSettled = false;
     if (props()?.routines) {
       // Read-only: dnzzl.automations (classic herdr plugin) -> `herdr-automations list --json`.
@@ -304,6 +307,65 @@ export default class RexSidebar extends View {
     if (top && (word !== "normal" || m.swapUsed > 4 * GB))
       kids.push(div().px(16).pt(12).text_size(11.5).text_color(t.dim).child(`Biggest: ${top.name} (${mb(top.b)}). Quitting it frees the most.`));
     return v_flex().size_full().bg(t.chrome).child(v_flex().id("rex-memory").flex_1().min_h(0).overflow_y_scrollbar().pb(12).children(kids));
+  }
+
+  // A space's icon: its product's own favicon, found once and copied into the app home (image()
+  // reads from there). First an icon file named for Herdr (.herdr/icon.svg|png), then the files the
+  // repo itself tracks (git ls-files: no clones, no node_modules, runs nothing) ranked
+  // public/favicon.svg > favicon.svg > favicon.png > apple-touch-icon > icon/logo.svg. Repos tried:
+  // the folder's own, then its child repos (the one named like the space first). None: no icon.
+  findIcon(cx, s, pl) {
+    this.icons[s.id] = "pending";
+    const tabs = new Set((s.tabs ?? []).map((x) => x.id));
+    const dir = pl.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+    if (!dir || s.machine) { this.icons[s.id] = null; return; } // remote spaces: not read over ssh
+    const GIT = ["-c", "core.fsmonitor=false", "--no-optional-locks"];
+    // The main app's icon first (a web / app / dashboard / landing / site folder, or one named like
+    // the space), then by file type, then the shallowest path.
+    const main = (p) => new RegExp(`(^|/)(web|app|dashboard|landing|site|www|${s.name.replace(/[^\w-]/g, "")})/`, "i").test(p);
+    const rank = (p) => (main(p) ? -350 : 0) + (/public\/favicon\.svg$/.test(p) ? 0 : /favicon\.svg$/.test(p) ? 1 : /favicon\.png$/.test(p) ? 2 : /apple-touch-icon\.png$/.test(p) ? 3 : 4) * 100 + p.split("/").length;
+    cx.spawn(async (cx) => {
+      let found = null;
+      try {
+        for (const f of [".herdr/icon.svg", ".herdr/icon.png"]) {
+          if ((await exec("test", ["-f", `${dir}/${f}`])).code === 0) { found = `${dir}/${f}`; break; }
+        }
+        if (!found) {
+          const top = await exec("git", [...GIT, "rev-parse", "--show-toplevel"], { cwd: dir }).catch(() => null);
+          const root = top?.code === 0 ? top.stdout.trim() : dir;
+          const kids = (await exec("find", [root, "-mindepth", "2", "-maxdepth", "2", "-name", ".git"])).stdout
+            .split("\n").filter(Boolean).map((g) => g.replace(/\/\.git$/, ""))
+            .sort((a, b) => (b.endsWith(`/${s.name}`) ? 1 : 0) - (a.endsWith(`/${s.name}`) ? 1 : 0) || a.localeCompare(b));
+          for (const repo of [...(top?.code === 0 ? [root] : []), ...kids]) {
+            const r = await exec("git", [...GIT, "ls-files", "--", "*favicon.svg", "*favicon.png", "*apple-touch-icon.png", "*/icon.svg", "*/logo.svg"], { cwd: repo }).catch(() => null);
+            const list = (r?.stdout ?? "").split("\n").filter(Boolean).sort((a, b) => rank(a) - rank(b));
+            if (list.length) { found = `${repo}/${list[0]}`; break; }
+          }
+        }
+        // Only a regular file, never a symlink (a repo could point one anywhere).
+        if (found && (await exec("test", ["-L", found])).code !== 0 && (await exec("test", ["-f", found])).code === 0) {
+          const ext = found.endsWith(".svg") ? "svg" : "png";
+          const rel = `data/rex-sidebar/icons/${s.id}.${ext}`;
+          await exec("mkdir", ["-p", `${appHome()}/data/rex-sidebar/icons`]);
+          if ((await exec("cp", ["-f", found, `${appHome()}/${rel}`])).code === 0) { this.icons[s.id] = rel; cx.notify(); return; }
+        }
+      } catch {}
+      this.icons[s.id] = null;
+    });
+  }
+
+  // Right-click on a space header: Move up / Move down (within its machine), and Herdr's own menu.
+  spaceMenu(t) {
+    const id = props().spaceMenu, all = spaces(), i = all.findIndex((x) => x.id === id), me = all[i];
+    const same = (j) => all[j] && (all[j].machine ?? null) === (me?.machine ?? null);
+    const close = () => closeOverlay(props().overlay);
+    const item = (key, label, enabled, fn) => h_flex().id(key).h(28).px(10).mx(4).rounded(6).items_center().text_size(12.5)
+      .text_color(enabled ? t.foreground : t.dim).when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => { fn(); close(); }))
+      .child(label);
+    return v_flex().size_full().py(4).bg(t.popover)
+      .child(item("sm-up", "Move up", same(i - 1), () => run("space.move", { id, index: i })))
+      .child(item("sm-down", "Move down", same(i + 1), () => run("space.move", { id, index: i + 2 })))
+      .child(item("sm-more", "More…", true, () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id } } })));
   }
 
   // Footer: "15.7 / 18 GB · agents 1.3 GB". Grey; the accent only above 85% memory pressure.
@@ -500,6 +562,7 @@ export default class RexSidebar extends View {
     const t = theme();
     if (props()?.top) return this.top(t);
     if (props()?.ram) return this.ramFoot(t);
+    if (props()?.spaceMenu) return this.spaceMenu(t);
     if (props()?.memory) return this.memoryPage(t);
     if (props()?.nav) return this.nav(t);
     if (props()?.routines) return this.routines(t);
@@ -562,14 +625,44 @@ export default class RexSidebar extends View {
       for (const s of mine) {
         const key = `sp-${s.id}`;
         const folded = this.folded.has(s.id);
+        const ico = this.icons[s.id];
+        if (ico === undefined) this.findIcon(cx, s, pl);
+        const idx = sp.findIndex((x) => x.id === s.id);
+        const dragging = this.dragSp !== null && this.dragSp !== undefined;
         out.push(
-          h_flex().id(key).mx(8).px(8).pt(12).pb(3).gap(5).items_center().cursor_pointer()
-            .on_click(() => run("space.select", { id: s.id }))
+          h_flex().id(key).relative().mx(8).px(8).pt(12).pb(3).gap(5).items_center().cursor_pointer()
+            .when(this.dragSp === s.id && this.overSp !== s.id, (el) => el.opacity(0.5))
+            // Drag a space header onto another of the same machine to move it there (space.move,
+            // Herdr keeps the order); a plain click selects it. Right-click: Move up / down.
+            .when(dragging && this.overSp === s.id && this.dragSp !== s.id, (el) => el.child(
+              div().absolute().left(0).right(0).h(2).bg(t.accent)
+                .when(sp.findIndex((x) => x.id === this.dragSp) < idx, (l) => l.bottom(0))
+                .when(sp.findIndex((x) => x.id === this.dragSp) > idx, (l) => l.top(0))))
+            .on_mouse_down("left", () => { this.dragSp = s.id; this.overSp = s.id; })
+            .on_mouse_move((_e, cx2) => {
+              if (!dragging) return;
+              const src = sp.find((x) => x.id === this.dragSp);
+              const over = src && (src.machine ?? null) === (s.machine ?? null) ? s.id : null;
+              if (this.overSp !== over) { this.overSp = over; cx2.notify(); }
+            })
+            .on_mouse_up("left", (_e, cx2) => {
+              const from = this.dragSp, over = this.overSp;
+              this.dragSp = null; this.overSp = null;
+              if (from && over === s.id && from !== s.id) run("space.move", { id: from, index: idx + 1 });
+              else if (from === s.id) run("space.select", { id: s.id });
+              cx2.notify();
+            })
+            .on_mouse_down("right", () => openOverlay({ mod: "rex-sidebar", kind: "popup", width: 180, height: 104, props: { spaceMenu: s.id } }))
             .child(
               div().id(`${key}-fold`).size(14).flex_none().flex().items_center().justify_center()
                 .on_click((_e, cx2) => { cx2.stop_propagation(); folded ? this.folded.delete(s.id) : this.folded.add(s.id); cx2.notify(); })
                 .child(svg(asset(folded ? "chevron-right" : "chevron-down")).size(11).text_color(t.dim)),
             )
+            // The product's own icon, quiet: dimmed unless the space is active or hovered.
+            .when(Boolean(ico), (el) => el.child(
+              div().id(`${key}-ico`).size(14).flex_none().rounded(3).overflow_hidden()
+                .opacity(s.active ? 1 : 0.6).hover((st) => st.opacity(1))
+                .child(image(ico).w(14).h(14))))
             .child(div().truncate().text_size(11.5).text_color(s.active ? t.muted : t.dim).child(s.name))
             .when(Boolean(s.branch), (el) => el.child(div().truncate().flex_1().text_size(11).text_color(t.dim).child(s.branch)))
             .when(!s.branch, (el) => el.child(div().flex_1())),

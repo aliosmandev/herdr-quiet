@@ -18,6 +18,8 @@ Agents run; you look only when one needs you. The "Needs you" strip is the only 
 - **Status line.** The footer reads `2 machines · 14 terminals · 13/18 GB` (herdr-core version in its tooltip).
 - **Group by state.** `⌘⌥G` switches the list to Needs you / Working / Finished / Idle sections, each with a count.
 - **Split tabs expand.** A tab with several panes shows a faint pane count; click it to list the panes and jump to one.
+- **Reorder spaces.** Drag a space header onto another one of the same machine (Herdr keeps the order), or right-click it: Move up / Move down / More….
+- **Product icons.** Each space header shows its product's favicon at 14 px, dimmed unless the space is active or hovered. Found once from the files the repo tracks (`git ls-files`: the main web/app/dashboard folder first), or set your own with `.herdr/icon.svg` / `.herdr/icon.png` in the repo. No icon found: no icon.
 - **Settled.** Tabs you put away fold into a "Settled (N)" section at the bottom.
 - **Side by side.** Split the shown tab (`⌘D`, `⌘⇧D`, or the bar buttons), or dock any other chat beside it: alt-click its row. Shift-click floats it instead.
 - **Changes for every repo.** `⌘⇧G`: each git repo in the focused folder (a folder of products shows them all) with its branch, ahead/behind and changed files; click a file for its diff. Read-only.
