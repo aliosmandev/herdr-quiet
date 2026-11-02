@@ -61,7 +61,7 @@ git checkout <commit> -- mods layouts keys.rex.json themes   # or: git revert <c
 ```
 
 ## Cost
-Built to stay cheap on a busy Mac: hidden panels do no work, the RAM footer samples every 15 s (about 30 ms), Changes runs git only while open. Measured idle: about 2–3 points of CPU over Herdr's own layout.
+Built to stay cheap on a busy Mac: hidden panels do no work, the RAM footer samples every 15 s (about 30 ms), Changes runs git only while open. Measured with 4-5 agents working: about the same CPU as Herdr's own layout (11.6% vs 12.4%); the spinner turns every 160 ms because 80 ms doubled it.
 
 ## Limits (what the API does not allow)
 - Mods cannot restyle terminal text, so the summary is a parsed side panel, not a re-rendered chat.

@@ -9,10 +9,11 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay, readTextFile, writeTextFile } from "herdr";
 
 const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
-// OpenCode's busy spinner: braille frames every 80 ms in its muted text colour
+// OpenCode's busy spinner: its braille frames in its muted text colour, every 160 ms (OpenCode: 80 ms).
+// Each frame redraws the window: with 4-5 agents working, 80 ms cost 22% CPU, 160 ms 11.6% (= static).
 // (anomalyco/opencode packages/tui/src/component/spinner-frames.ts:1, interval in spinner.tsx:36).
 const BUSY = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const busy = (t, size = 13) => div().w(size).flex_none().flex().justify_center().text_size(size).text_color(t.muted).frames(BUSY, 80);
+const busy = (t, size = 13) => div().w(size).flex_none().flex().justify_center().text_size(size).text_color(t.muted).frames(BUSY, 160);
 const asset = (n) => `mods/rex-sidebar/${n}.svg`;
 // The only coloured thing on a row: a small tinted "Needs you" pill.
 const needsPill = (t) => div().flex_none().px(6).h(16).rounded(8).flex().items_center().text_size(10.5)
@@ -69,9 +70,13 @@ function until(iso) {
   return m < 1440 ? `today ${hm}` : `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${hm}`;
 }
 
+// An agent's title when it says what the agent is doing, like Herdr's own agents list (#281):
+// not its program name, a path or user@host; else the tab's name.
 function labelOf(a) {
   const name = clean(a.title);
-  return !name || name.toLowerCase() === a.program?.name?.toLowerCase() ? a.tab_name : name;
+  const telling = name && name.toLowerCase() !== a.program?.name?.toLowerCase() && name.toLowerCase() !== a.program?.key
+    && !/^[~/]|^[A-Za-z]:\\/.test(name) && !name.includes("@");
+  return telling ? name : a.tab_name;
 }
 
 function icon(p, size, color) {
@@ -246,6 +251,12 @@ export default class RexSidebar extends View {
     this.open = new Set(); // tab ids whose panes are shown under the row
     this.subOpen = new Set(); // tab ids whose sub-agent tree is shown
     this.icons = {};          // space id -> app-home-relative icon path | null (none found) | pending
+    // Pins (data/rex-sidebar/icons.json) apply without a restart: a changed file re-runs the lookup.
+    if (!props() || Object.keys(props()).length === 0) cx.timer.every(30000, (cx) => cx.spawn(async (cx) => {
+      const now = await readTextFile(`${appHome()}/data/rex-sidebar/icons.json`).catch(() => null);
+      if (this.pinsSeen !== undefined && now !== this.pinsSeen) { this.icons = {}; cx.notify(); }
+      this.pinsSeen = now;
+    }));
     this.dragSp = null;       // space id being dragged
     this.overSp = null;
     this.showSettled = false;
