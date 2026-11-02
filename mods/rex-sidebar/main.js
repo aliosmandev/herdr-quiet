@@ -6,7 +6,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay, readTextFile, writeTextFile } from "herdr";
+import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay, readTextFile, writeTextFile, settings } from "herdr";
 
 const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
 // OpenCode's busy spinner: its braille frames in its muted text colour, every 160 ms (OpenCode: 80 ms).
@@ -14,6 +14,11 @@ const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
 // (anomalyco/opencode packages/tui/src/component/spinner-frames.ts:1, interval in spinner.tsx:36).
 const BUSY = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const busy = (t, size = 13) => div().w(size).flex_none().flex().justify_center().text_size(size).text_color(t.muted).frames(BUSY, 160);
+// Tabular numbers: GPUI has no font features, so numbers use the terminal font (monospace, so
+// every digit has the same width and counts, times and RAM don't jitter). Same font as the UI
+// when the UI font is already monospace.
+const mono = () => { const v = settings()?.font; return typeof v === "string" ? v : ""; };
+const tn = (el) => (mono() ? el.font_family(mono()) : el);
 const asset = (n) => `mods/rex-sidebar/${n}.svg`;
 // The only coloured thing on a row: a small tinted "Needs you" pill.
 const needsPill = (t) => div().flex_none().px(6).h(16).rounded(8).flex().items_center().text_size(10.5)
@@ -297,9 +302,9 @@ export default class RexSidebar extends View {
     const line = (id, label, sub, bytes, hot) => h_flex().id(id).mx(8).px(8).h(24).gap(8).items_center().rounded(6).hover((s) => s.bg(t.hover))
       .child(div().truncate().flex_1().min_w(0).text_size(12.5).text_color(hot ? t.foreground : t.muted).child(label))
       .when(Boolean(sub), (el) => el.child(div().truncate().flex_none().max_w(90).text_size(11).text_color(t.dim).child(sub)))
-      .child(div().flex_none().text_size(11.5).text_color(hot ? t.blocked : t.muted).child(mb(bytes)));
+      .child(tn(div().flex_none().text_size(11.5).text_color(hot ? t.blocked : t.muted).child(mb(bytes))));
     const stat = (label, value, hot) => h_flex().px(16).h(20).items_center().text_size(12)
-      .child(div().flex_1().text_color(t.dim).child(label)).child(div().text_color(hot ? t.blocked : t.muted).child(value));
+      .child(div().flex_1().text_color(t.dim).child(label)).child(tn(div()).text_color(hot ? t.blocked : t.muted).child(value));
     const kids = [
       head("Memory"),
       stat("Used", `${gb(m.used)} / ${gb(m.total)} GB`, word === "critical"),
@@ -409,12 +414,12 @@ export default class RexSidebar extends View {
       .on_click(() => run("layout.select", { stack: "sidebar-pages", child: "page-memory" }))
       .tooltip(`${coreVersion ? `herdr-core ${coreVersion} · ` : ""}${r ? `memory pressure ${r.pressure}% · click for details` : "reading memory…"}`)
       // "2 machines · 14 terminals · 13/18 GB": the one status line (herdr-core version in the tooltip).
-      .child(div().truncate().min_w(0).text_color(t.dim).child([
+      .child(tn(div()).truncate().min_w(0).text_color(t.dim).child([
         `${machines().length} machine${machines().length === 1 ? "" : "s"}`,
         `${terminals().filter((x) => x.state === "live").length} terminals`,
       ].filter(Boolean).join(" · ")))
       .child(div().flex_none().text_color(t.dim).child("·"))
-      .child(div().flex_none().text_color(hot ? t.blocked : t.dim).child(r ? `${gb(r.used)}/${gb(r.total)} GB` : this.ramError ? "memory n/a" : "…"));
+      .child(tn(div()).flex_none().text_color(hot ? t.blocked : t.dim).child(r ? `${gb(r.used)}/${gb(r.total)} GB` : this.ramError ? "memory n/a" : "…"));
   }
 
   // Titlebar row: room for the traffic lights, then the sidebar toggle; new space on the right.
@@ -532,18 +537,18 @@ export default class RexSidebar extends View {
       .when(multi, (el) => el.child(
         h_flex().id(`${key}-x`).flex_none().gap(2).px(3).h(18).rounded(4).items_center().hover((s) => s.bg(t.raised))
           .on_click((_e, cx) => { cx.stop_propagation(); open ? this.open.delete(r.tab.id) : this.open.add(r.tab.id); cx.notify(); })
-          .child(div().text_size(11).text_color(t.dim).child(String(r.tab.panes)))
+          .child(tn(div().text_size(11).text_color(t.dim).child(String(r.tab.panes))))
           .child(svg(asset(open ? "chevron-down" : "chevron-right")).size(10).text_color(t.dim)),
       ))
       // Sub-agents its agents started with `hc run` (live ones), as "› N".
       .when(c.subs > 0, (el) => el.child(
-        div().id(`${key}-subs`).flex_none().px(3).h(18).rounded(4).flex().items_center().hover((s) => s.bg(t.raised))
+        tn(div().id(`${key}-subs`)).flex_none().px(3).h(18).rounded(4).flex().items_center().hover((s) => s.bg(t.raised))
           .text_size(11).text_color(t.dim).tooltip(`${c.subs} sub-agent${c.subs > 1 ? "s" : ""}: click to ${this.subOpen.has(r.tab.id) ? "hide" : "show"}`)
           .on_click((_e, cx) => { cx.stop_propagation(); this.subOpen.has(r.tab.id) ? this.subOpen.delete(r.tab.id) : this.subOpen.add(r.tab.id); cx.notify(); })
           .child(`› ${c.subs}`)))
       // How long this turn has been running.
-      .when(st === "working" && Boolean(r.tab.working_since), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(r.tab.working_since))))
-      .when(n >= 1 && n <= 9, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`⌘${n}`)))
+      .when(st === "working" && Boolean(r.tab.working_since), (el) => el.child(tn(div().flex_none().text_size(11).text_color(t.dim).child(since(r.tab.working_since)))))
+      .when(n >= 1 && n <= 9, (el) => el.child(tn(div().flex_none().text_size(11).text_color(t.dim).child(`⌘${n}`))))
       .child(
         st === "working" ? busy(t)
           : st === "blocked" ? needsPill(t)
@@ -567,7 +572,7 @@ export default class RexSidebar extends View {
           .child(h_flex().flex_1().min_w(0).pl(10).pr(8).gap(8).items_center()
             .child(mark(x.program, 13, t.dim))
             .child(div().truncate().flex_1().min_w(0).text_size(12).text_color(t.muted).child(termName(x)))
-            .when(Boolean(x.created_ms), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms))))
+            .when(Boolean(x.created_ms), (el) => el.child(tn(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms)))))
             .child(st === "working" ? busy(t, 12) : st === "blocked" ? needsPill(t) : div().size(5).mx(3).flex_none().rounded(3).bg(st === "done" ? t.done : "#00000000"))));
         out.push(...this.subRows(t, [x.address], depth + 1, seen));
       }
@@ -729,7 +734,7 @@ export default class RexSidebar extends View {
             .hover((s) => s.bg(t.hover)).on_click(() => run("terminal.peek", { terminal: x.address }))
             .child(mark(x.program, 16, t.muted))
             .child(div().truncate().flex_1().min_w(0).text_size(13).text_color(t.muted).child(termName(x)))
-            .when(Boolean(x.created_ms), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms))))
+            .when(Boolean(x.created_ms), (el) => el.child(tn(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms)))))
             .child(x.status === "working" ? busy(t) : x.status === "blocked" ? needsPill(t) : div().size(6).mx(3).flex_none()));
           out.push(...this.subRows(t, [x.address]));
         }

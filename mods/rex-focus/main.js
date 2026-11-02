@@ -5,7 +5,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 
-import { agents, panes, focused, spaces, machines, hc, run, theme, openOverlay, props, nextCommand, layout, shared, setShared, exec } from "herdr";
+import { agents, panes, focused, spaces, machines, hc, run, theme, openOverlay, props, nextCommand, layout, shared, setShared, exec, settings } from "herdr";
 
 const WORDS = { working: "Working", blocked: "Needs you", done: "Finished", idle: "Idle" };
 const asset = (n) => `mods/rex-focus/${n}.svg`;
@@ -90,6 +90,12 @@ function hidden(id) {
   const find = (n) => (n?.id === id ? n : (n?.children ?? []).map(find).find(Boolean) ?? null);
   return Boolean(find(layout())?.hidden);
 }
+
+// Tabular numbers: GPUI has no font features, so numbers use the terminal font (monospace, so
+// every digit has the same width and counts, times and RAM don't jitter). Same font as the UI
+// when the UI font is already monospace.
+const mono = () => { const v = settings()?.font; return typeof v === "string" ? v : ""; };
+const tn = (el) => (mono() ? el.font_family(mono()) : el);
 
 export default class RexFocus extends View {
   init(_p, cx) {
@@ -181,9 +187,9 @@ export default class RexFocus extends View {
         .when(Boolean(chat), (el) => el.child(div().flex_none().text_color(t.dim).child("›")).child(div().truncate().min_w(0).text_color(t.muted).child(chat)))
         .when(Boolean(sp?.branch), (el) => el.child(h_flex().gap(4).items_center().flex_none().text_color(t.dim)
           .child(svg(asset("git-branch")).size(12).text_color(t.dim)).child(sp.branch))))
-      .when(working > 0, (el) => el.child(div().flex_none().text_color(t.dim).child(`${working} working`)))
+      .when(working > 0, (el) => el.child(tn(div()).flex_none().text_color(t.dim).child(`${working} working`)))
       .when(blocked > 0, (el) => el.child(
-        div().id("needs-you").flex_none().px(6).py(1).rounded(5).cursor_pointer().text_color(t.blocked)
+        tn(div().id("needs-you")).flex_none().px(6).py(1).rounded(5).cursor_pointer().text_color(t.blocked)
           .hover((s) => s.bg(t.hover))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click(() => needs && run("agent.focus", { terminal: needs.address }))
