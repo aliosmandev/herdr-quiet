@@ -148,7 +148,7 @@ export default class RexChanges extends View {
     if (this.busy) return;
     if (hidden("changes")) return; // closed (the default): no git at all
     const root = this.folder();
-    if (!root) return;
+    if (!root || !root.startsWith("/")) return; // only an absolute path reaches find/git
     this.busy = true;
     cx.spawn(async (cx) => {
       try {

@@ -6,7 +6,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay } from "herdr";
+import { agents, spaces, machines, layout, run, theme, setAgentOrder, openOverlay, props, panes, exec, hc, shared, setShared, terminals, appHome, closeOverlay, readTextFile, writeTextFile } from "herdr";
 
 const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
 // OpenCode's busy spinner: braille frames every 80 ms in its muted text colour
@@ -318,7 +318,9 @@ export default class RexSidebar extends View {
     this.icons[s.id] = "pending";
     const tabs = new Set((s.tabs ?? []).map((x) => x.id));
     const dir = pl.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
-    if (!dir || s.machine) { this.icons[s.id] = null; return; } // remote spaces: not read over ssh
+    // Remote spaces aren't read over ssh; only an absolute path reaches find/git (a path starting
+    // with "-" would read as an option).
+    if (!dir || s.machine || !dir.startsWith("/")) { this.icons[s.id] = null; return; }
     const GIT = ["-c", "core.fsmonitor=false", "--no-optional-locks"];
     // The main app's icon first (a web / app / dashboard / landing / site folder, or one named like
     // the space), then by file type, then the shallowest path.
@@ -327,27 +329,41 @@ export default class RexSidebar extends View {
     cx.spawn(async (cx) => {
       let found = null;
       try {
-        for (const f of [".herdr/icon.svg", ".herdr/icon.png"]) {
+        for (const f of [".herdr/icon.svg"]) {
           if ((await exec("test", ["-f", `${dir}/${f}`])).code === 0) { found = `${dir}/${f}`; break; }
         }
         if (!found) {
           const top = await exec("git", [...GIT, "rev-parse", "--show-toplevel"], { cwd: dir }).catch(() => null);
-          const root = top?.code === 0 ? top.stdout.trim() : dir;
+          const root = top?.code === 0 && top.stdout.trim().startsWith("/") ? top.stdout.trim() : dir;
           const kids = (await exec("find", [root, "-mindepth", "2", "-maxdepth", "2", "-name", ".git"])).stdout
             .split("\n").filter(Boolean).map((g) => g.replace(/\/\.git$/, ""))
             .sort((a, b) => (b.endsWith(`/${s.name}`) ? 1 : 0) - (a.endsWith(`/${s.name}`) ? 1 : 0) || a.localeCompare(b));
           for (const repo of [...(top?.code === 0 ? [root] : []), ...kids]) {
-            const r = await exec("git", [...GIT, "ls-files", "--", "*favicon.svg", "*favicon.png", "*apple-touch-icon.png", "*/icon.svg", "*/logo.svg"], { cwd: repo }).catch(() => null);
+            const r = await exec("git", [...GIT, "ls-files", "--", "*favicon.svg", "*/icon.svg", "*/logo.svg"], { cwd: repo }).catch(() => null);
             const list = (r?.stdout ?? "").split("\n").filter(Boolean).sort((a, b) => rank(a) - rank(b));
             if (list.length) { found = `${repo}/${list[0]}`; break; }
           }
         }
-        // Only a regular file, never a symlink (a repo could point one anywhere).
+        // Only a regular file, never a symlink (a repo could point one anywhere). Drawn as a one-colour
+        // glyph (svg() tints by shape), so a full-size background rect would become a solid square:
+        // drop it, and keep a cleaned copy in the app home (svg() reads from there).
         if (found && (await exec("test", ["-L", found])).code !== 0 && (await exec("test", ["-f", found])).code === 0) {
-          const ext = found.endsWith(".svg") ? "svg" : "png";
-          const rel = `data/rex-sidebar/icons/${s.id}.${ext}`;
-          await exec("mkdir", ["-p", `${appHome()}/data/rex-sidebar/icons`]);
-          if ((await exec("cp", ["-f", found, `${appHome()}/${rel}`])).code === 0) { this.icons[s.id] = rel; cx.notify(); return; }
+          const src = await readTextFile(found);
+          if (src && src.length < 64 * 1024 && /<svg[\s>]/i.test(src)) {
+            const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(src);
+            const W = vb?.[1], H = vb?.[2];
+            const isBg = (tag) => {
+              const a = (n) => new RegExp(`\\b${n}\\s*=\\s*["']([^"']*)["']`, "i").exec(tag)?.[1];
+              const full = (v, d) => v === "100%" || (d && v !== undefined && parseFloat(v) >= parseFloat(d));
+              return full(a("width"), W) && full(a("height"), H) && !parseFloat(a("x") ?? "0") && !parseFloat(a("y") ?? "0");
+            };
+            const clean = src.replace(/<rect\b[^>]*\/?>(\s*<\/rect>)?/gi, (tag) => (isBg(tag) ? "" : tag));
+            const rel = `data/rex-sidebar/glyphs/${s.id}.svg`;
+            await exec("mkdir", ["-p", `${appHome()}/data/rex-sidebar/glyphs`]);
+            const prev = await readTextFile(`${appHome()}/${rel}`);
+            if (prev !== clean) await writeTextFile(`${appHome()}/${rel}`, clean, prev);
+            this.icons[s.id] = rel; cx.notify(); return;
+          }
         }
       } catch {}
       this.icons[s.id] = null;
@@ -658,11 +674,13 @@ export default class RexSidebar extends View {
                 .on_click((_e, cx2) => { cx2.stop_propagation(); folded ? this.folded.delete(s.id) : this.folded.add(s.id); cx2.notify(); })
                 .child(svg(asset(folded ? "chevron-right" : "chevron-down")).size(11).text_color(t.dim)),
             )
-            // The product's own icon, quiet: dimmed unless the space is active or hovered.
-            .when(Boolean(ico), (el) => el.child(
-              div().id(`${key}-ico`).size(14).flex_none().rounded(3).overflow_hidden()
-                .opacity(s.active ? 1 : 0.6).hover((st) => st.opacity(1))
-                .child(image(ico).w(14).h(14))))
+            // The product's mark in one style for every space: a one-colour 14 px glyph in the muted
+            // text colour, the normal text colour when active, never brand colour. No SVG found: the
+            // space's first letter in the same slot.
+            .child(div().size(14).flex_none().flex().items_center().justify_center()
+              .child(ico && ico !== "pending"
+                ? svg(ico).size(14).text_color(s.active ? t.foreground : t.muted)
+                : div().text_size(10.5).font_semibold().text_color(s.active ? t.foreground : t.muted).child([...clean(s.name)][0]?.toUpperCase() ?? "·")))
             .child(div().truncate().text_size(11.5).text_color(s.active ? t.muted : t.dim).child(s.name))
             .when(Boolean(s.branch), (el) => el.child(div().truncate().flex_1().text_size(11).text_color(t.dim).child(s.branch)))
             .when(!s.branch, (el) => el.child(div().flex_1())),
