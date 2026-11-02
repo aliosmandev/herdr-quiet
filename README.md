@@ -12,7 +12,10 @@ Inspired by Superlogical's Rex, with a Linear-like calm. Not affiliated with eit
 Agents run; you look only when one needs you. The "Needs you" strip is the only interrupt. A row says one line about its chat (state, how long, sub-agents); the details stay in the pane.
 
 ## What you get
-- **Sidebar of chats.** This Mac / other machines > spaces > one row per tab. Each row: a flat one-colour program mark (Claude, Codex, shell), the chat title, how long the current turn has run, its sub-agents (`› 3`) and a `⌘N` hint. Only state adds colour: OpenCode's braille spinner while an agent works, a dot when it needs you.
+- **Sidebar of chats.** This Mac / other machines > spaces > one row per tab. Each row: a flat one-colour program mark (Claude, Codex, shell), the chat title, how long the current turn has run, its sub-agents (`› 3`) and a `⌘N` hint. Only state adds colour: OpenCode's braille spinner while an agent works, a small tinted "Needs you" pill when it needs you.
+- **Sub-agent tree.** Click a row's `› N` to list the terminals its agents started with `hc run`, indented under it with a thin tree line (mark, name, age, state); click one to peek at it.
+- **Elsewhere.** Agents running in no Herdr tab (started by another tool with `hc run`) get their own section, with their sub-agents.
+- **Status line.** The footer reads `2 machines · 14 terminals · 13/18 GB` (herdr-core version in its tooltip).
 - **Group by state.** `⌘⌥G` switches the list to Needs you / Working / Finished / Idle sections, each with a count.
 - **Split tabs expand.** A tab with several panes shows a faint pane count; click it to list the panes and jump to one.
 - **Settled.** Tabs you put away fold into a "Settled (N)" section at the bottom.
@@ -46,6 +49,14 @@ herdr-app do layout.switch '{"name":"rex"}'    # or ctrl-shift-l
 herdr-app do layout.switch '{"name":"main"}'   # back to Herdr's default
 ```
 `install.sh` replaces only the `layout:rex` section of `keys.json` and keeps a copy in `keys.json.bak-rex`. Internal ids (the `rex` layout, `rex-*` mods) keep their first name so existing installs don't break.
+
+## Undo
+The layout and mods are plain files in this repo, and `install.sh` copies them into Herdr. So when an agent changes the UI and you don't like it, undo it like any code change:
+```sh
+git log --oneline -5          # find the change
+git checkout <commit> -- mods layouts keys.rex.json themes   # or: git revert <commit>
+./install.sh                  # Herdr reloads the files at once
+```
 
 ## Cost
 Built to stay cheap on a busy Mac: hidden panels do no work, the RAM footer samples every 15 s (about 30 ms), Changes runs git only while open. Measured idle: about 2–3 points of CPU over Herdr's own layout.

@@ -14,6 +14,11 @@ const isClaude = (p) => /claude/i.test(`${p?.name ?? ""} ${p?.icon ?? ""}`);
 const BUSY = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const busy = (t, size = 13) => div().w(size).flex_none().flex().justify_center().text_size(size).text_color(t.muted).frames(BUSY, 80);
 const asset = (n) => `mods/rex-sidebar/${n}.svg`;
+// The only coloured thing on a row: a small tinted "Needs you" pill.
+const needsPill = (t) => div().flex_none().px(6).h(16).rounded(8).flex().items_center().text_size(10.5)
+  .bg(/^#[0-9a-f]{6}$/i.test(t.blocked) ? t.blocked + "26" : t.blocked).text_color(t.blocked).child("Needs you");
+// A core terminal's name: its own name, else its program, else its command.
+const termName = (x) => x.name || x.program?.name || (x.argv?.[0] ?? "").split("/").pop() || x.address;
 // "<1m", "4m", "2h": how long the current turn has been running.
 const since = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 1 ? "<1m" : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`; };
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -152,6 +157,7 @@ const gb = (b) => (b / GB >= 10 ? (b / GB).toFixed(0) : (b / GB).toFixed(1));
 const mb = (b) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : `${Math.round(b / 1024 ** 2)} MB`);
 // Pressure word from kern.memorystatus_level (free %): our thresholds, close to Activity Monitor's colours.
 const pressureWord = (p) => (p >= 85 ? "critical" : p >= 70 ? "warn" : "normal");
+let coreVersion = null; // `hc --version`, read once by the footer
 const pids = {}; // terminal address -> { pid, tab }
 
 async function sampleRam(detail = false) {
@@ -224,6 +230,11 @@ export default class RexSidebar extends View {
       cx.timer.every(MEM_PAGE_MS, tick);
       cx.timer.every(1000, (cx) => { const on = findNode(layout(), "sidebar-pages")?.active === "page-memory"; if (on && !this.wasOn) tick(cx); this.wasOn = on; });
     }
+    if (props()?.ram && !coreVersion) cx.spawn(async (cx) => {
+      const v = await hc(["--version"]).catch(() => null);
+      coreVersion = /\d+\.\d+\.\d+/.exec(v?.stdout ?? "")?.[0] ?? null;
+      cx.notify();
+    });
     if (props()?.ram) {
       const tick = (cx) => cx.spawn(async (cx) => {
         try { setShared("rex.ram", await sampleRam()); } catch (e) { this.ramError = String(e?.message ?? e); cx.notify(); }
@@ -233,6 +244,7 @@ export default class RexSidebar extends View {
     }
     this.folded = new Set();
     this.open = new Set(); // tab ids whose panes are shown under the row
+    this.subOpen = new Set(); // tab ids whose sub-agent tree is shown
     this.showSettled = false;
     if (props()?.routines) {
       // Read-only: dnzzl.automations (classic herdr plugin) -> `herdr-automations list --json`.
@@ -301,9 +313,14 @@ export default class RexSidebar extends View {
     return h_flex().id("ram-foot").size_full().px(16).gap(8).items_center().text_size(11).border_t(1).border_color(t.border)
       .cursor_pointer().hover((s) => s.bg(t.hover))
       .on_click(() => run("layout.select", { stack: "sidebar-pages", child: "page-memory" }))
-      .tooltip(r ? `Memory pressure ${r.pressure}% · click for details` : "Reading memory…")
-      .child(div().flex_none().text_color(hot ? t.blocked : t.dim).child(r ? `${gb(r.used)} / ${gb(r.total)} GB` : this.ramError ? "memory: n/a" : "…"))
-      .when(Boolean(r), (el) => el.child(div().flex_none().text_color(t.dim).child("·")).child(div().truncate().text_color(t.dim).child(`agents ${mb(r.agents)}`)));
+      .tooltip(`${coreVersion ? `herdr-core ${coreVersion} · ` : ""}${r ? `memory pressure ${r.pressure}% · click for details` : "reading memory…"}`)
+      // "2 machines · 14 terminals · 13/18 GB": the one status line (herdr-core version in the tooltip).
+      .child(div().truncate().min_w(0).text_color(t.dim).child([
+        `${machines().length} machine${machines().length === 1 ? "" : "s"}`,
+        `${terminals().filter((x) => x.state === "live").length} terminals`,
+      ].filter(Boolean).join(" · ")))
+      .child(div().flex_none().text_color(t.dim).child("·"))
+      .child(div().flex_none().text_color(hot ? t.blocked : t.dim).child(r ? `${gb(r.used)}/${gb(r.total)} GB` : this.ramError ? "memory n/a" : "…"));
   }
 
   // Titlebar row: room for the traffic lights, then the sidebar toggle; new space on the right.
@@ -425,15 +442,43 @@ export default class RexSidebar extends View {
           .child(svg(asset(open ? "chevron-down" : "chevron-right")).size(10).text_color(t.dim)),
       ))
       // Sub-agents its agents started with `hc run` (live ones), as "› N".
-      .when(c.subs > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).tooltip(`${c.subs} sub-agent${c.subs > 1 ? "s" : ""}`).child(`› ${c.subs}`)))
+      .when(c.subs > 0, (el) => el.child(
+        div().id(`${key}-subs`).flex_none().px(3).h(18).rounded(4).flex().items_center().hover((s) => s.bg(t.raised))
+          .text_size(11).text_color(t.dim).tooltip(`${c.subs} sub-agent${c.subs > 1 ? "s" : ""}: click to ${this.subOpen.has(r.tab.id) ? "hide" : "show"}`)
+          .on_click((_e, cx) => { cx.stop_propagation(); this.subOpen.has(r.tab.id) ? this.subOpen.delete(r.tab.id) : this.subOpen.add(r.tab.id); cx.notify(); })
+          .child(`› ${c.subs}`)))
       // How long this turn has been running.
       .when(st === "working" && Boolean(r.tab.working_since), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(r.tab.working_since))))
       .when(n >= 1 && n <= 9, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`⌘${n}`)))
       .child(
         st === "working" ? busy(t)
-          : st === "blocked" ? div().size(6).mx(3).flex_none().rounded(3).bg(t.blocked)
+          : st === "blocked" ? needsPill(t)
           : div().size(6).mx(3).flex_none(),
       );
+  }
+
+  // Sub-agents of a tab (terminals its agents started with `hc run`), indented under the row with a
+  // thin tree line: mark, name, age, state. Click one to peek at it.
+  subRows(t, parents, depth = 1, seen = new Set()) {
+    const all = terminals().filter((x) => x.state === "live");
+    const out = [];
+    for (const parent of parents) {
+      for (const x of all.filter((y) => y.parent === parent && !seen.has(y.address))) {
+        seen.add(x.address);
+        const st = x.status;
+        out.push(h_flex().id(`sub-${x.address}`).ml(16 + depth * 14).mr(8).h(24).items_center().cursor_pointer().rounded(6)
+          .hover((s) => s.bg(t.hover))
+          .on_click(() => run("terminal.peek", { terminal: x.address }))
+          .child(div().w(1).h_full().flex_none().bg(t.border))
+          .child(h_flex().flex_1().min_w(0).pl(10).pr(8).gap(8).items_center()
+            .child(mark(x.program, 13, t.dim))
+            .child(div().truncate().flex_1().min_w(0).text_size(12).text_color(t.muted).child(termName(x)))
+            .when(Boolean(x.created_ms), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms))))
+            .child(st === "working" ? busy(t, 12) : st === "blocked" ? needsPill(t) : div().size(5).mx(3).flex_none().rounded(3).bg(st === "done" ? t.done : "#00000000"))));
+        out.push(...this.subRows(t, [x.address], depth + 1, seen));
+      }
+    }
+    return out;
   }
 
   // The panes of an opened split tab, indented under its row: mark, title, state. Click focuses that pane.
@@ -532,6 +577,7 @@ export default class RexSidebar extends View {
         if (!folded) for (const r of rows.filter((x) => x.space.id === s.id)) {
           out.push(this.row(t, r, chats.get(r.tab.id), `tb-${r.tab.id}`, nOf(r), ""));
           if (r.tab.panes > 1 && this.open.has(r.tab.id)) out.push(...this.paneRows(t, r, pl, all));
+          if (this.subOpen.has(r.tab.id)) out.push(...this.subRows(t, chats.get(r.tab.id).agents.map((a) => a.address)));
         }
       }
       if (!mine.length) out.push(state === "unavailable"
@@ -540,6 +586,27 @@ export default class RexSidebar extends View {
           .hover((s) => s.bg(t.hover)).on_click(newHere)
           .child(svg(asset("plus")).size(12).flex_none().text_color(t.dim))
           .child(div().truncate().text_size(12).text_color(t.dim).child(`New shell on ${where}`)));
+    }
+
+    // Elsewhere: live terminals in no Herdr tab (no herdr.tab label) whose starter isn't shown either,
+    // e.g. an agent another tool started with `hc run`. Their own sub-agents hang under them.
+    {
+      const live = terminals().filter((x) => x.state === "live");
+      const shown = new Set(all.map((a) => a.address));
+      const inTab = (x) => Boolean(x.labels?.["herdr.tab"]);
+      const roots = live.filter((x) => !inTab(x) && !(x.parent && (shown.has(x.parent) || live.some((y) => y.address === x.parent))));
+      if (roots.length) {
+        out.push(div().px(16).pt(16).pb(3).text_size(11).text_color(t.dim).child(`Elsewhere ${roots.length}`));
+        for (const x of roots) {
+          out.push(h_flex().id(`el-${x.address}`).mx(8).px(8).h(28).gap(9).items_center().rounded(6).cursor_pointer()
+            .hover((s) => s.bg(t.hover)).on_click(() => run("terminal.peek", { terminal: x.address }))
+            .child(mark(x.program, 16, t.muted))
+            .child(div().truncate().flex_1().min_w(0).text_size(13).text_color(t.muted).child(termName(x)))
+            .when(Boolean(x.created_ms), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(since(x.created_ms))))
+            .child(x.status === "working" ? busy(t) : x.status === "blocked" ? needsPill(t) : div().size(6).mx(3).flex_none()));
+          out.push(...this.subRows(t, [x.address]));
+        }
+      }
     }
 
     // Settled tabs (put away, still running), folded at the bottom like T3 Code's "Settled (52)".
