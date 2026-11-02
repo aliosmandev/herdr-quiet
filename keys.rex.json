@@ -1,0 +1,26 @@
+{
+  "layout:rex": {
+    "cmd-1": "rex-focus.nth:1",
+    "cmd-2": "rex-focus.nth:2",
+    "cmd-3": "rex-focus.nth:3",
+    "cmd-4": "rex-focus.nth:4",
+    "cmd-5": "rex-focus.nth:5",
+    "cmd-6": "rex-focus.nth:6",
+    "cmd-7": "rex-focus.nth:7",
+    "cmd-8": "rex-focus.nth:8",
+    "cmd-9": "rex-focus.nth:9",
+    "cmd-d": "rex-focus.split:right",
+    "cmd-shift-d": "rex-focus.split:down",
+    "cmd-\\": "layout.toggle:sidebar",
+    "cmd-b": "layout.toggle:sidebar",
+    "cmd-n": "space.new",
+    "cmd-k": "app.palette",
+    "cmd-shift-s": "layout.toggle:summary",
+    "cmd-alt-1": "rex-focus.page:agents",
+    "cmd-alt-2": "rex-focus.page:routines",
+    "cmd-shift-g": "layout.toggle:changes",
+    "cmd-alt-3": "rex-focus.page:memory",
+    "cmd-alt-m": "rex-focus.page:memory",
+    "cmd-alt-g": "rex-focus.group"
+  }
+}
