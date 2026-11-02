@@ -15,8 +15,13 @@ const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-
 // run them when it re-hashes a changed file. Reading config runs nothing, so: list every filter the
 // repo sees (all scopes, includes followed) and blank each one for the real call.
 async function safeFor(dir) {
-  const r = await exec("git", [...SAFE, "config", "--includes", "--name-only", "--get-regexp", "^filter\\."], { cwd: dir }).catch(() => ({ stdout: "" }));
-  const names = new Set(r.stdout.split("\n").map((k) => /^filter\.(.+)\.[^.]+$/.exec(k.trim())?.[1]).filter(Boolean));
+  const r = await exec("git", [...SAFE, "config", "--includes", "--name-only", "--get-regexp", "^filter\\."], { cwd: dir }).catch(() => null);
+  // Fail closed: exit 1 means "no filters"; any other failure means we can't tell, so no status.
+  if (!r || (r.code !== 0 && r.code !== 1)) return null;
+  const names = new Set(r.code === 0 ? r.stdout.split("\n").map((k) => /^filter\.(.+)\.[^.]+$/.exec(k.trim())?.[1]).filter(Boolean) : []);
+  // A name git would split differently in "-c key=value" (an "=" or anything unusual) can't be
+  // blanked reliably, so that repo is skipped rather than read.
+  if ([...names].some((n) => !/^[A-Za-z0-9._-]+$/.test(n))) return null;
   const off = [...names].flatMap((n) => ["-c", `filter.${n}.clean=`, "-c", `filter.${n}.smudge=`, "-c", `filter.${n}.process=`, "-c", `filter.${n}.required=false`]);
   return [...SAFE, ...off];
 }
@@ -157,7 +162,9 @@ export default class RexChanges extends View {
         }
         const repos = [];
         for (const dir of dirs) {
-          const s = await exec("git", [...(await safeFor(dir)), "status", "--porcelain=v2", "--branch", "--ignore-submodules=all"], { cwd: dir }).catch(() => null);
+          const args = await safeFor(dir);
+          if (!args) { repos.push({ dir, name: dir === root ? dir.split("/").pop() : dir.slice(root.length + 1), branch: "", ahead: 0, behind: 0, files: [], skipped: true }); continue; }
+          const s = await exec("git", [...args, "status", "--porcelain=v2", "--branch", "--ignore-submodules=all"], { cwd: dir }).catch(() => null);
           if (!s || s.code !== 0) continue;
           const r = { dir, name: dir === root ? dir.split("/").pop() : dir.slice(root.length + 1), ...parse(s.stdout) };
           // Open a repo the first time it has changes; after that the user's fold wins.
@@ -265,10 +272,13 @@ export default class RexChanges extends View {
       : !this.repos ? note("Looking for repos…")
       : !repos.length ? note("No git repo here or below.")
       : v_flex().id("rex-changes-list").flex_1().min_h(0).overflow_y_scrollbar().py(4).gap(0)
-        .children(repos.filter((r) => r.files.length || r.ahead || r.behind).map((r) => this.repo(t, r)))
-        .when(repos.some((r) => !r.files.length && !r.ahead && !r.behind), (el) => el.child(
+        .children(repos.filter((r) => !r.skipped && (r.files.length || r.ahead || r.behind)).map((r) => this.repo(t, r)))
+        .when(repos.some((r) => r.skipped), (el) => el.child(
           div().px(16).pt(8).text_size(11).text_color(t.dim).truncate()
-            .child(`Clean: ${repos.filter((r) => !r.files.length && !r.ahead && !r.behind).map((r) => r.name).join(", ")}`)));
+            .child(`Not read (unusual git filter config): ${repos.filter((r) => r.skipped).map((r) => r.name).join(", ")}`)))
+        .when(repos.some((r) => !r.skipped && !r.files.length && !r.ahead && !r.behind), (el) => el.child(
+          div().px(16).pt(8).text_size(11).text_color(t.dim).truncate()
+            .child(`Clean: ${repos.filter((r) => !r.skipped && !r.files.length && !r.ahead && !r.behind).map((r) => r.name).join(", ")}`)));
     return v_flex().size_full().bg(t.chrome).child(header).child(body);
   }
 }
