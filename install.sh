@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copies herdr-linear into the Herdr app home. Never overwrites other layouts/mods.
+# Copies herdr-quiet into the Herdr app home. Never overwrites other layouts/mods.
 set -e
 H="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 mkdir -p "$H/layouts" "$H/mods" "$H/themes"

@@ -1,8 +1,8 @@
-# herdr-linear
+# herdr-quiet
 
 A quiet layout for the [Herdr](https://herdr.dev) desktop app: one sidebar of chats, panes side by side, and nothing loud.
 
-Inspired by Linear and Superlogical's Rex. Not affiliated with either.
+Inspired by Superlogical's Rex, with a Linear-like calm. Not affiliated with either.
 
 **A layout + mods, not a fork:** it installs into your Herdr config and works on any Herdr desktop app (tested on herdr-app 0.1.11, macOS).
 
@@ -40,7 +40,7 @@ Agents run; you look only when one needs you. The "Needs you" strip is the only 
 
 ## Install
 ```sh
-git clone https://github.com/aliosmandev/herdr-linear && cd herdr-linear
+git clone https://github.com/aliosmandev/herdr-quiet && cd herdr-quiet
 ./install.sh                                   # into ~/.config/herdr-app (or $HERDR_APP_HOME), adds the keys
 herdr-app do layout.switch '{"name":"rex"}'    # or ctrl-shift-l
 herdr-app do layout.switch '{"name":"main"}'   # back to Herdr's default
