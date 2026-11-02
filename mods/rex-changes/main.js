@@ -10,7 +10,16 @@ import { exec, focused, spaces, theme, settings, readTextFile, layout } from "he
 
 // Every git call runs in folders we didn't choose (any child repo, e.g. a fresh clone), so turn off
 // the config that can start a program on a read: fsmonitor, hooks; and take no index lock.
-const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--no-optional-locks"];
+const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.external=", "-c", "core.pager=cat", "--no-optional-locks"];
+// Filter drivers (clean / smudge / process) are programs a repo's config can name, and status can
+// run them when it re-hashes a changed file. Reading config runs nothing, so: list every filter the
+// repo sees (all scopes, includes followed) and blank each one for the real call.
+async function safeFor(dir) {
+  const r = await exec("git", [...SAFE, "config", "--includes", "--name-only", "--get-regexp", "^filter\\."], { cwd: dir }).catch(() => ({ stdout: "" }));
+  const names = new Set(r.stdout.split("\n").map((k) => /^filter\.(.+)\.[^.]+$/.exec(k.trim())?.[1]).filter(Boolean));
+  const off = [...names].flatMap((n) => ["-c", `filter.${n}.clean=`, "-c", `filter.${n}.smudge=`, "-c", `filter.${n}.process=`, "-c", `filter.${n}.required=false`]);
+  return [...SAFE, ...off];
+}
 const asset = (n) => `mods/rex-changes/${n}.svg`;
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 const MAX_FILES = 40;
@@ -148,7 +157,7 @@ export default class RexChanges extends View {
         }
         const repos = [];
         for (const dir of dirs) {
-          const s = await exec("git", [...SAFE, "status", "--porcelain=v2", "--branch"], { cwd: dir }).catch(() => null);
+          const s = await exec("git", [...(await safeFor(dir)), "status", "--porcelain=v2", "--branch", "--ignore-submodules=all"], { cwd: dir }).catch(() => null);
           if (!s || s.code !== 0) continue;
           const r = { dir, name: dir === root ? dir.split("/").pop() : dir.slice(root.length + 1), ...parse(s.stdout) };
           // Open a repo the first time it has changes; after that the user's fold wins.

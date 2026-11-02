@@ -34,6 +34,7 @@ Agents run; you look only when one needs you. The "Needs you" strip is the only 
 | `⌘⌥G` | group the sidebar by state / by space |
 | `⌘B` or `⌘\` | sidebar |
 | `⌘⌥1` / `⌘⌥2` / `⌘⌥3` | Agents / Routines / Memory page (`⌘⌥M` also opens Memory) |
+| `⌘⌥4` | bring up the Macro app (or macro.com), if you use Macro |
 | `⌘N` | new space |
 | `⌘K` | command palette |
 

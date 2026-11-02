@@ -5,7 +5,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 
-import { agents, panes, focused, spaces, machines, hc, run, theme, openOverlay, props, nextCommand, layout, shared, setShared } from "herdr";
+import { agents, panes, focused, spaces, machines, hc, run, theme, openOverlay, props, nextCommand, layout, shared, setShared, exec } from "herdr";
 
 const WORDS = { working: "Working", blocked: "Needs you", done: "Finished", idle: "Idle" };
 const asset = (n) => `mods/rex-focus/${n}.svg`;
@@ -108,6 +108,12 @@ export default class RexFocus extends View {
           // cmd-1..9 (keys.json, layout:rex): show the Nth chat of the sidebar list.
           const r = shownRows()[Number(/\d+/.exec(c)?.[0]) - 1];
           if (r) { run("space.select", { id: r.space }); run("tab.select", { id: r.tab }); }
+        } else if (c === "macro") {
+          // cmd-alt-4: Herdr mods can't show a web view, so bring up the Macro app (or macro.com).
+          cx.spawn(async () => {
+            const r = await exec("open", ["-a", "Macro"]).catch(() => ({ code: 1 }));
+            if (r.code !== 0) await exec("open", ["https://macro.com/app"]).catch(() => {});
+          });
         } else if (c === "group") {
           // cmd-alt-g: the sidebar groups chats by state instead of by machine and space (and back).
           setShared("rex.group", shared("rex.group") === "state" ? "space" : "state");

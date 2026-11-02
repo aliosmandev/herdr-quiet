@@ -21,6 +21,7 @@
     "cmd-shift-g": "layout.toggle:changes",
     "cmd-alt-3": "rex-focus.page:memory",
     "cmd-alt-m": "rex-focus.page:memory",
-    "cmd-alt-g": "rex-focus.group"
+    "cmd-alt-g": "rex-focus.group",
+    "cmd-alt-4": "rex-focus.macro"
   }
 }
